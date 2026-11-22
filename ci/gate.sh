@@ -24,7 +24,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
 # Reihenfolge = Laufzeit aufsteigend.
-ALL_GATES=(workflow-timeouts actionlint shellcheck prose gofmt go-vet
+ALL_GATES=(workflow-timeouts actionlint shellcheck ci-selftest prose gofmt go-vet
            go-test staticcheck gosec web-lint web-build)
 
 # Nicht in "all": brauchen Netz zu einer Schwachstellen-Datenbank. Die
@@ -168,6 +168,13 @@ gate_shellcheck() {
 # Mechanisch pruefbare Stilregeln fuer die Doku dieses Forks, uebernommen aus
 # kaindlnetwork/scaling-adventure (siehe CLAUDE.md, "Wie die Dokumentation
 # geschrieben ist").
+# Die Gates pruefen sich selbst: ci/test_findings.py haelt fest, dass der
+# Befund-Filter bei Abbruch, Kompilierfehler und unlesbarer Ausgabe rot wird.
+gate_ci_selftest() {
+    need python3 || return 1
+    python3 -m unittest discover -s ci -p 'test_*.py'
+}
+
 gate_prose() {
     local files=()
     mapfile -t files < <(git ls-files --cached --others --exclude-standard -- "${PROSE_FILES[@]}" | grep -E '\.md$')
@@ -236,23 +243,28 @@ gate_staticcheck() {
     need staticcheck go python3 || return 1
     build_stub || return 1
     go_env
-    local json changed=()
+    local json rc changed=()
     mapfile -t changed < <(changed_go_files)
-    # staticcheck endet mit 1, sobald es etwas findet; das wertet der Filter.
+    # Der Exit-Code geht an den Filter: 1 heisst "Befunde", alles andere
+    # Abbruch. Ohne ihn saehe ein abgebrochener Lauf aus wie ein sauberer.
     json="$(cd server && staticcheck -f json ./...)"
-    printf '%s\n' "$json" | python3 ci/findings.py staticcheck "$REPO_ROOT/server" "${changed[@]}"
+    rc=$?
+    printf '%s\n' "$json" | python3 ci/findings.py staticcheck "$REPO_ROOT/server" --exit "$rc" "${changed[@]}"
 }
 
 gate_gosec() {
     need gosec go python3 || return 1
     build_stub || return 1
     go_env
-    local json changed=()
+    local json rc changed=()
     mapfile -t changed < <(changed_go_files)
     # G104 (ungeprueftes err) deckt go vet/staticcheck ab; G115
     # (int-Konversion) ist im Altbestand allgegenwaertig.
-    json="$(cd server && gosec -quiet -fmt json -exclude=G104,G115 -exclude-dir=dl_lib ./... 2>/dev/null)"
-    printf '%s\n' "$json" | python3 ci/findings.py gosec "$REPO_ROOT/server" "${changed[@]}"
+    # gosec endet bei Befunden mit 1; ob die Analyse vollstaendig war, steht
+    # in "Golang errors" im JSON und wird dort geprueft.
+    json="$(cd server && gosec -quiet -fmt json -exclude=G104,G115 -exclude-dir=dl_lib ./...)"
+    rc=$?
+    printf '%s\n' "$json" | python3 ci/findings.py gosec "$REPO_ROOT/server" --exit "$rc" "${changed[@]}"
 }
 
 gate_govulncheck() {
