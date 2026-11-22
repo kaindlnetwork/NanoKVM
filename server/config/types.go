@@ -45,6 +45,9 @@ type Turn struct {
 type Security struct {
 	LoginLockoutDuration int `yaml:"loginLockoutDuration"`
 	LoginMaxFailures     int `yaml:"loginMaxFailures"`
+	// TrustedProxies lists reverse proxies (IPs or CIDRs) whose
+	// X-Forwarded-* headers are honoured. Empty: none.
+	TrustedProxies []string `yaml:"trustedProxies"`
 }
 
 type Hardware struct {
