@@ -1,0 +1,96 @@
+name: Gates
+
+# Die Gates selbst stehen in ci/gate.sh, nicht hier. Dieser Workflow ist nur
+# die GitHub-Verkabelung: Image bereitstellen, auschecken, Skript aufrufen.
+#
+# Runner: Repository-Variable CI_RUNNER (Settings -> Secrets and variables ->
+# Actions -> Variables). Leer = ubuntu-latest (Actions-Kontingent). Mit
+# "self-hosted" laeuft alles auf dem eigenen Runner, der dafuer Docker
+# braucht. Siehe docs/fork/CI.md.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # Woechentlich: neue CVEs in Abhaengigkeiten fallen auch ohne Commit auf.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  gates:
+    name: ci/gate.sh
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Image-Tag aus ci/Dockerfile ableiten
+        id: tag
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          echo "image=ghcr.io/${repo}/ci:$(ci/deps-tag.sh)" >> "$GITHUB_OUTPUT"
+
+      # Pull Requests aus einem Fork bekommen nur ein Lese-Token. Sie bauen
+      # ein fehlendes Image lokal und pushen es nicht.
+      - name: Push erlaubt?
+        id: trust
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ -z "$HEAD_REPO" ] || [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: An GHCR anmelden
+        if: steps.trust.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image ziehen oder bauen
+        env:
+          IMAGE: ${{ steps.tag.outputs.image }}
+          PUSH: ${{ steps.trust.outputs.push }}
+        run: |
+          if docker pull "$IMAGE"; then
+            exit 0
+          fi
+          docker build -t "$IMAGE" -f ci/Dockerfile ci
+          if [ "$PUSH" = "true" ]; then
+            docker push "$IMAGE"
+          fi
+
+      - name: Gates
+        env:
+          IMAGE: ${{ steps.tag.outputs.image }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            base="origin/$BASE_REF"
+          else
+            base="HEAD~1"
+          fi
+          docker run --rm -e GATE_BASE="$base" -v "$PWD:/work" -w /work "$IMAGE" \
+            ./ci/gate.sh all govulncheck web-audit
