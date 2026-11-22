@@ -37,7 +37,12 @@ func TestLoginCookieAndUserAuthorizationLifecycle(t *testing.T) {
 	admin.POST("/users", service.CreateUser)
 	admin.PUT("/users/:username", service.UpdateUser)
 
-	adminCookie := loginCookie(t, router, "admin", "admin")
+	// The factory password only unlocks the password page (enforced
+	// server-side), so the lifecycle test starts from a changed password.
+	if _, err := store.SetPassword("admin", "admin-password-1"); err != nil {
+		t.Fatal(err)
+	}
+	adminCookie := loginCookie(t, router, "admin", "admin-password-1")
 	if !adminCookie.HttpOnly || adminCookie.SameSite != http.SameSiteStrictMode || adminCookie.Path != "/" {
 		t.Fatalf("unsafe session cookie: %+v", adminCookie)
 	}

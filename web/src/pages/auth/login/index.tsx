@@ -55,7 +55,14 @@ export const Login = (): ReactElement => {
         }
 
         setMsg('');
-        navigate('/', { replace: true });
+        // With the factory password only the password page is reachable.
+        return api
+          .isPasswordUpdated()
+          .then((state: any) => {
+            const mustChange = state?.code === 0 && state.data?.isUpdated === false;
+            navigate(mustChange ? '/auth/password' : '/', { replace: true });
+          })
+          .catch(() => navigate('/', { replace: true }));
       })
       .catch(() => {
         setMsg(t('auth.error'));

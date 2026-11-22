@@ -1,6 +1,9 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 
 import { notifyAuthExpired, notifyAuthRefresh } from '@/lib/auth-events.ts';
+
+// HTTP 428, see server/middleware/jwt.go (PasswordChangeRequiredStatus).
+const PASSWORD_CHANGE_REQUIRED = 428;
 import { getBaseUrl } from '@/lib/service.ts';
 
 type Response = {
@@ -43,6 +46,12 @@ class Http {
         const code = error.response?.status;
         if (code === 401) {
           notifyAuthExpired();
+        } else if (code === PASSWORD_CHANGE_REQUIRED) {
+          // The server refuses everything but the password page while the
+          // account still uses the factory password.
+          if (!window.location.hash.startsWith('#/auth/password')) {
+            window.location.hash = '#/auth/password';
+          }
         } else if (code === 403) {
           notifyAuthRefresh();
         }

@@ -20,9 +20,14 @@ import (
 func TestCheckTokenUsesLiveRoleAndVersion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := authn.NewStore(filepath.Join(t.TempDir(), "pwd"))
-	admin, ok, err := store.Authenticate("admin", "admin")
+	// The factory password only reaches the password page (see
+	// password_change_test.go), so start from a changed one.
+	if _, err := store.SetPassword("admin", "admin-password-1"); err != nil {
+		t.Fatal(err)
+	}
+	admin, ok, err := store.Authenticate("admin", "admin-password-1")
 	if err != nil || !ok {
-		t.Fatalf("default login: ok=%v err=%v", ok, err)
+		t.Fatalf("admin login: ok=%v err=%v", ok, err)
 	}
 	if err = store.Create("alice", "valid-password", authn.RoleUser); err != nil {
 		t.Fatal(err)
