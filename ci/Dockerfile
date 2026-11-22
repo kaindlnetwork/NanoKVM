@@ -4,12 +4,12 @@
 # Werkzeugversion ist eine Aenderung hier und damit ein neues Image; die
 # Pipeline baut es beim ersten Lauf, alle weiteren Laeufe ziehen es nur.
 
-FROM golang:1.25.0-bookworm
+FROM golang:1.27.4-bookworm
 
-ARG STATICCHECK_VERSION=2025.1.1
-ARG GOSEC_VERSION=v2.22.8
-ARG GOVULNCHECK_VERSION=v1.1.4
-ARG ACTIONLINT_VERSION=v1.7.7
+ARG STATICCHECK_VERSION=v0.8.2
+ARG GOSEC_VERSION=v2.30.0
+ARG GOVULNCHECK_VERSION=v1.10.0
+ARG ACTIONLINT_VERSION=v1.7.12
 ARG NODE_MAJOR=22
 ARG PNPM_VERSION=11.29.0
 
