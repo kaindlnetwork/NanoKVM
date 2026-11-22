@@ -47,10 +47,10 @@ logger:
 authentication: enable              # Whether to enable identity verification for HTTP API and Web endpoints. Options are `enable` or `disable`. Default is `enable`. Highly recommended to leave this enabled for internet-facing devices!
 jwt:
    secretKey: ""                    # The secret key used to sign and verify JWT Tokens. If left empty, a random key will be generated automatically on startup
-   refreshTokenDuration: 2678400    # The token refresh duration threshold in seconds before forcing a re-login. Default is `2678400` (~31 days)
+   refreshTokenDuration: 86400      # The token refresh duration threshold in seconds before forcing a re-login. Default is `86400` (1 day; hardened fork, upstream: 2678400)
    revokeTokensOnLogout: true       # Whether logout invalidates all sessions belonging to that user. Other users are never logged out. Setting this to false only clears the browser cookie and is not recommended. Default is `true`
 security:
-   loginLockoutDuration: 0,         # The duration (in seconds) to ban an IP from attempting to log in again after reaching the failure limit. If set to `0` or left empty, brute-force protection is disabled. Default is `0`
+   loginLockoutDuration: 300,       # The duration (in seconds) to ban an IP from attempting to log in again after reaching the failure limit. `0` or empty means the default `300`; set a negative value (e.g. `-1`) to disable brute-force protection (hardened fork)
    loginMaxFailures:     5,         # The maximum number of continuous failed login attempts allowed per IP before triggering protection. Default is `5`
 
 

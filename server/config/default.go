@@ -1,5 +1,13 @@
 package config
 
+// Hardened defaults (fork): sessions last one day instead of 31, and the
+// login brute-force lockout is on.
+const (
+	defaultRefreshTokenDuration = 86400
+	defaultLoginLockoutDuration = 300
+	defaultLoginMaxFailures     = 5
+)
+
 var defaultConfig = &Config{
 	Proto: "http",
 	Host:  "",
@@ -17,7 +25,7 @@ var defaultConfig = &Config{
 	},
 	JWT: JWT{
 		SecretKey:            "",
-		RefreshTokenDuration: 2678400,
+		RefreshTokenDuration: defaultRefreshTokenDuration,
 		RevokeTokensOnLogout: true,
 	},
 	Stun: "stun.l.google.com:19302",
@@ -28,7 +36,7 @@ var defaultConfig = &Config{
 	},
 	Authentication: "enable",
 	Security: Security{
-		LoginLockoutDuration: 0,
+		LoginLockoutDuration: defaultLoginLockoutDuration,
 		LoginMaxFailures:     5,
 	},
 }
@@ -40,7 +48,17 @@ func checkDefaultValue() {
 	}
 
 	if instance.JWT.RefreshTokenDuration == 0 {
-		instance.JWT.RefreshTokenDuration = 2678400
+		instance.JWT.RefreshTokenDuration = defaultRefreshTokenDuration
+	}
+
+	// loginLockoutDuration: 0 (the upstream default, written into every
+	// generated server.yaml) now means "use the default"; only a negative
+	// value turns the protection off.
+	if instance.Security.LoginLockoutDuration == 0 {
+		instance.Security.LoginLockoutDuration = defaultLoginLockoutDuration
+	}
+	if instance.Security.LoginMaxFailures <= 0 {
+		instance.Security.LoginMaxFailures = defaultLoginMaxFailures
 	}
 
 	if instance.Stun == "" {
