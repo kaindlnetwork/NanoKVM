@@ -25,6 +25,31 @@ type Principal struct {
 	Username    string
 	Role        authn.Role
 	Permissions []authn.Permission
+	// MustChangePassword is set while the account still uses the factory
+	// password. Such a session may only reach passwordChangeAllowedRoutes.
+	MustChangePassword bool
+}
+
+// PasswordChangeRequiredStatus is returned while the account still has to
+// replace its initial password. 428 is otherwise unused by this API, so the
+// web UI can redirect to the password page without confusing it with 401/403.
+const PasswordChangeRequiredStatus = http.StatusPreconditionRequired
+
+// passwordChangeAllowedRoutes are the only API routes a session with
+// MustChangePassword may use: enough to show the password page, change the
+// password and log out. Everything else, including the console, is refused
+// server-side, not just hidden by the UI.
+var passwordChangeAllowedRoutes = map[string]struct{}{
+	"GET /api/auth/password":  {},
+	"POST /api/auth/password": {},
+	"GET /api/auth/account":   {},
+	"POST /api/auth/logout":   {},
+	"GET /api/vm/web-title":   {},
+}
+
+func passwordChangeAllowed(method, path string) bool {
+	_, ok := passwordChangeAllowedRoutes[method+" "+path]
+	return ok
 }
 
 // Has reports whether the principal effectively holds the permission.
@@ -47,6 +72,10 @@ func CheckToken() gin.HandlerFunc {
 		principal, token, ok := authenticate(c)
 		if !ok {
 			abortUnauthorized(c)
+			return
+		}
+		if principal.MustChangePassword && !passwordChangeAllowed(c.Request.Method, c.Request.URL.Path) {
+			abortPasswordChangeRequired(c)
 			return
 		}
 
@@ -188,6 +217,10 @@ func CheckTokenOrLoopbackInternalToken() gin.HandlerFunc {
 			abortUnauthorized(c)
 			return
 		}
+		if principal.MustChangePassword && !passwordChangeAllowed(c.Request.Method, c.Request.URL.Path) {
+			abortPasswordChangeRequired(c)
+			return
+		}
 		c.Set(principalContextKey, principal)
 		c.Set(tokenContextKey, token)
 		c.Next()
@@ -214,14 +247,20 @@ func authenticate(c *gin.Context) (Principal, *Token, bool) {
 		return Principal{}, nil, false
 	}
 	return Principal{
-		Username:    user.Username,
-		Role:        user.Role,
-		Permissions: authn.EffectivePermissions(user),
+		Username:           user.Username,
+		Role:               user.Role,
+		Permissions:        authn.EffectivePermissions(user),
+		MustChangePassword: user.MustChangePassword,
 	}, token, true
 }
 
 func abortUnauthorized(c *gin.Context) {
 	c.JSON(http.StatusUnauthorized, "unauthorized")
+	c.Abort()
+}
+
+func abortPasswordChangeRequired(c *gin.Context) {
+	c.JSON(PasswordChangeRequiredStatus, "password change required")
 	c.Abort()
 }
 
