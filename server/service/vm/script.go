@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +13,8 @@ import (
 	"NanoKVM-Server/utils"
 )
 
-const ScriptDirectory = "/etc/kvm/scripts"
+// ScriptDirectory is a variable so tests can point it at a temp dir.
+var ScriptDirectory = "/etc/kvm/scripts"
 
 func (s *Service) GetScripts(c *gin.Context) {
 	var rsp proto.Response
@@ -57,11 +57,16 @@ func (s *Service) UploadScript(c *gin.Context) {
 		return
 	}
 
-	if _, err = os.Stat(ScriptDirectory); err != nil {
-		_ = os.MkdirAll(ScriptDirectory, 0o755)
+	target, err := utils.JoinSafe(ScriptDirectory, header.Filename)
+	if err != nil {
+		rsp.ErrRsp(c, -2, "invalid file name")
+		return
 	}
 
-	target := fmt.Sprintf("%s/%s", ScriptDirectory, header.Filename)
+	if _, err = os.Stat(ScriptDirectory); err != nil {
+		_ = os.MkdirAll(ScriptDirectory, 0o700)
+	}
+
 	err = c.SaveUploadedFile(header, target)
 	if err != nil {
 		rsp.ErrRsp(c, -2, "save failed")
@@ -87,16 +92,33 @@ func (s *Service) RunScript(c *gin.Context) {
 		return
 	}
 
-	command := fmt.Sprintf("%s/%s", ScriptDirectory, req.Name)
+	if !isScript(req.Name) {
+		rsp.ErrRsp(c, -1, "invalid arguments")
+		return
+	}
+	scriptPath, err := utils.JoinSafe(ScriptDirectory, req.Name)
+	if err != nil {
+		rsp.ErrRsp(c, -1, "invalid file name")
+		return
+	}
 
-	name := strings.ToLower(req.Name)
-	if strings.HasSuffix(name, ".py") {
-		command = fmt.Sprintf("python %s", command)
+	// Execute the file directly instead of through "sh -c": the name never
+	// reaches a shell, so it cannot inject commands.
+	//
+	// Running an uploaded script is the purpose of this endpoint (it needs
+	// the terminal grant). scriptPath is one validated file name inside
+	// ScriptDirectory, so gosec's G204 does not apply.
+	var cmd *exec.Cmd
+	if strings.HasSuffix(strings.ToLower(req.Name), ".py") {
+		cmd = exec.Command("python", scriptPath) // #nosec G204 -- validated path, see above
+	} else if hasShebang(req.Name) {
+		cmd = exec.Command(scriptPath) // #nosec G204 -- validated path, see above
+	} else {
+		// Same fallback the shell applied before: scripts without "#!" run in sh.
+		cmd = exec.Command("sh", scriptPath) // #nosec G204 -- validated path, see above
 	}
 
 	var output []byte
-	var err error
-	cmd := exec.Command("sh", "-c", command)
 
 	if req.Type == "foreground" {
 		output, err = cmd.CombinedOutput()
@@ -133,16 +155,19 @@ func (s *Service) DeleteScript(c *gin.Context) {
 		return
 	}
 
-	file := fmt.Sprintf("%s/%s", ScriptDirectory, req.Name)
+	if !isScript(req.Name) {
+		rsp.ErrRsp(c, -2, "invalid file name")
+		return
+	}
 
-	if err := os.Remove(file); err != nil {
-		log.Errorf("delete script %s failed: %s", file, err)
+	if err := utils.ConfinedRemove(ScriptDirectory, req.Name); err != nil {
+		log.Errorf("delete script %s failed: %s", req.Name, err)
 		rsp.ErrRsp(c, -3, "delete failed")
 		return
 	}
 
 	rsp.OkRsp(c)
-	log.Debugf("delete script %s success", file)
+	log.Debugf("delete script %s success", req.Name)
 }
 
 func isScript(name string) bool {
@@ -152,4 +177,9 @@ func isScript(name string) bool {
 	}
 
 	return false
+}
+
+func hasShebang(name string) bool {
+	data, err := utils.ConfinedReadFile(ScriptDirectory, name)
+	return err == nil && len(data) >= 2 && data[0] == '#' && data[1] == '!'
 }

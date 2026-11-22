@@ -2,7 +2,7 @@ package vm
 
 import (
 	"NanoKVM-Server/proto"
-	"fmt"
+	"NanoKVM-Server/utils"
 	"os"
 	"path/filepath"
 
@@ -10,7 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const autostartDirectory = "/etc/kvm/autostart"
+var autostartDirectory = "/etc/kvm/autostart"
 
 func (s *Service) GetAutostart(c *gin.Context) {
 	var rsp proto.Response
@@ -50,20 +50,15 @@ func (s *Service) UploadAutostart(c *gin.Context) {
 	}
 
 	if _, err := os.Stat(autostartDirectory); err != nil {
-		_ = os.MkdirAll(autostartDirectory, 0o755)
+		_ = os.MkdirAll(autostartDirectory, 0o700)
 	}
 
-	target := fmt.Sprintf("%s/%s", autostartDirectory, fileName)
-
-	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-	if err != nil {
-		rsp.ErrRsp(c, -1, "create file fail")
-		return
-	}
-
-	defer f.Close()
-	_, err = f.WriteString(req.Content)
-	if err != nil {
+	// Autostart entries are executed at boot, so they keep the exec bit.
+	if err := utils.ConfinedWriteFile(autostartDirectory, fileName, []byte(req.Content), 0o700); err != nil {
+		if err == utils.ErrUnsafeFileName {
+			rsp.ErrRsp(c, -1, "invalid file name")
+			return
+		}
 		rsp.ErrRsp(c, -1, "write content fail")
 		return
 	}
@@ -78,8 +73,7 @@ func (s *Service) DeleteAutostart(c *gin.Context) {
 
 	fileName := c.Param("name")
 
-	file := fmt.Sprintf("%s/%s", autostartDirectory, fileName)
-	if err := os.Remove(file); err != nil {
+	if err := utils.ConfinedRemove(autostartDirectory, fileName); err != nil {
 		log.Errorf("delete autostart file %s fail", fileName)
 		rsp.ErrRsp(c, -3, "remove file fail")
 		return
@@ -92,8 +86,7 @@ func (s *Service) DeleteAutostart(c *gin.Context) {
 func (s *Service) GetAutostartContent(c *gin.Context) {
 	var rsp proto.Response
 	fileName := c.Param("name")
-	file := fmt.Sprintf("%s/%s", autostartDirectory, fileName)
-	content, err := os.ReadFile(file)
+	content, err := utils.ConfinedReadFile(autostartDirectory, fileName)
 	if err != nil {
 		rsp.ErrRsp(c, -1, "read file fail")
 		return
