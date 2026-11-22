@@ -17,6 +17,8 @@ import (
 
 var downloadClient = NewUpdateHTTPClient(15 * time.Minute)
 
+var errRedirectDowngrade = errors.New("refusing redirect from https to http")
+
 type DownloadInfo struct {
 	ContentLength int64
 	Written       int64
@@ -52,6 +54,12 @@ func preserveBasicAuthRedirect(req *http.Request, via []*http.Request) error {
 	}
 
 	previous := via[len(via)-1]
+	// Never leave TLS, with or without credentials: update manifests and
+	// packages run as root, and the plain hop would let anyone on the path
+	// replace both.
+	if previous.URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errRedirectDowngrade
+	}
 	authorization := previous.Header.Get("Authorization")
 	if authorization == "" {
 		return nil
@@ -98,11 +106,15 @@ func Download(req *http.Request, target string, maxBytes int64, beforeWrite func
 			return DownloadInfo{}, err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	// Callers download into a private update workspace; nothing else needs
+	// to read it, so new directories are root-only.
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		log.Errorf("create dir %s err: %s", filepath.Dir(target), err)
 		return DownloadInfo{}, err
 	}
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// target is chosen by the caller (a fresh os.MkdirTemp workspace plus a
+	// package name checked against packageNamePattern), not by the server.
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- caller-built path
 	if err != nil {
 		log.Errorf("cannot create file '%s', error: %s", target, err)
 		return DownloadInfo{}, err
