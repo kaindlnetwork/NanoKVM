@@ -114,6 +114,11 @@ func normalizeUpdateServerURL(raw string) (string, error) {
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return "", errors.New("invalid update server URL")
 	}
+	// Hardened fork: update packages run as root and are only checked against
+	// a digest served by the same server, so the transport must be TLS.
+	if parsed.Scheme != "https" {
+		return "", errors.New("update server URL must use https")
+	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", errors.New("update server URL must not contain a query or fragment")
 	}
@@ -133,7 +138,8 @@ func loadUpdateServerConfig() (UpdateServerConfig, error) {
 }
 
 func loadUpdateServerConfigFromPath(path string) (UpdateServerConfig, error) {
-	data, err := os.ReadFile(path)
+	// path is UpdateServerConfigFile (or a test directory), never user input.
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed configuration path
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return defaultUpdateServerConfig(), nil
@@ -166,6 +172,8 @@ func saveUpdateServerConfig(cfg UpdateServerConfig) error {
 
 func saveUpdateServerConfigToPath(path string, cfg UpdateServerConfig) error {
 	dir := filepath.Dir(path)
+	// dir is /etc/kvm, shared with other services; the file itself is 0600.
+	// #nosec G301 -- system config directory
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create update server config directory: %w", err)
 	}
@@ -202,7 +210,7 @@ func saveUpdateServerConfigToPath(path string, cfg UpdateServerConfig) error {
 		return fmt.Errorf("replace update server config: %w", err)
 	}
 
-	directory, err := os.Open(dir)
+	directory, err := os.Open(dir) // #nosec G304 -- directory of the fixed configuration path
 	if err == nil {
 		_ = directory.Sync()
 		_ = directory.Close()
