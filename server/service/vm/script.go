@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,9 @@ import (
 	"NanoKVM-Server/proto"
 	"NanoKVM-Server/utils"
 )
+
+// maxScriptSize caps uploaded scripts; they are read into memory.
+const maxScriptSize = 1 << 20
 
 // ScriptDirectory is a variable so tests can point it at a temp dir.
 var ScriptDirectory = "/etc/kvm/scripts"
@@ -57,8 +61,7 @@ func (s *Service) UploadScript(c *gin.Context) {
 		return
 	}
 
-	target, err := utils.JoinSafe(ScriptDirectory, header.Filename)
-	if err != nil {
+	if _, err = utils.SafeFileName(header.Filename); err != nil {
 		rsp.ErrRsp(c, -2, "invalid file name")
 		return
 	}
@@ -67,13 +70,23 @@ func (s *Service) UploadScript(c *gin.Context) {
 		_ = os.MkdirAll(ScriptDirectory, 0o700)
 	}
 
-	err = c.SaveUploadedFile(header, target)
+	// Written through os.Root: an existing symlink with this name cannot
+	// redirect the upload outside the script directory.
+	src, err := header.Open()
 	if err != nil {
 		rsp.ErrRsp(c, -2, "save failed")
 		return
 	}
-
-	_ = utils.EnsurePermission(target, 0o100)
+	content, err := io.ReadAll(io.LimitReader(src, maxScriptSize+1))
+	_ = src.Close()
+	if err != nil || len(content) > maxScriptSize {
+		rsp.ErrRsp(c, -2, "save failed")
+		return
+	}
+	if err = utils.ConfinedWriteFile(ScriptDirectory, header.Filename, content, 0o700); err != nil {
+		rsp.ErrRsp(c, -2, "save failed")
+		return
+	}
 
 	data := &proto.UploadScriptRsp{
 		File: header.Filename,
@@ -96,11 +109,13 @@ func (s *Service) RunScript(c *gin.Context) {
 		rsp.ErrRsp(c, -1, "invalid arguments")
 		return
 	}
-	scriptPath, err := utils.JoinSafe(ScriptDirectory, req.Name)
-	if err != nil {
+	// Only a regular file directly in ScriptDirectory runs; a symlink could
+	// point anywhere once the path leaves os.Root for exec.
+	if err := utils.ConfinedRegularFile(ScriptDirectory, req.Name); err != nil {
 		rsp.ErrRsp(c, -1, "invalid file name")
 		return
 	}
+	scriptPath := filepath.Join(ScriptDirectory, req.Name)
 
 	// Execute the file directly instead of through "sh -c": the name never
 	// reaches a shell, so it cannot inject commands.
@@ -119,6 +134,7 @@ func (s *Service) RunScript(c *gin.Context) {
 	}
 
 	var output []byte
+	var err error
 
 	if req.Type == "foreground" {
 		output, err = cmd.CombinedOutput()

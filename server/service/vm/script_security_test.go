@@ -3,6 +3,7 @@ package vm
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -105,5 +106,55 @@ func TestDeleteScriptRejectsPathTraversal(t *testing.T) {
 
 	if _, err := os.Stat(victim); err != nil {
 		t.Fatal("file outside the script directory was deleted")
+	}
+}
+
+// A symlink inside the script directory must not lead execution outside it.
+func TestRunScriptDoesNotFollowSymlinkOut(t *testing.T) {
+	router, dir := scriptRouter(t)
+	outside := filepath.Join(t.TempDir(), "outside.sh")
+	marker := outside + ".ran"
+	if err := os.WriteFile(outside, []byte("touch "+marker+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.sh")); err != nil {
+		t.Fatal(err)
+	}
+
+	postJSON(router, http.MethodPost, "/run", map[string]string{"name": "link.sh", "type": "foreground"})
+
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("symlink target outside the script directory was executed")
+	}
+}
+
+// Uploading over an existing symlink must not write through it.
+func TestUploadScriptDoesNotWriteThroughSymlink(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	original := ScriptDirectory
+	ScriptDirectory = dir
+	t.Cleanup(func() { ScriptDirectory = original })
+	outside := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "up.sh")); err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	router.POST("/upload", NewService().UploadScript)
+	body := &bytes.Buffer{}
+	form := multipart.NewWriter(body)
+	part, _ := form.CreateFormFile("file", "up.sh")
+	_, _ = part.Write([]byte("echo overwritten\n"))
+	_ = form.Close()
+	request := httptest.NewRequest(http.MethodPost, "/upload", body)
+	request.Header.Set("Content-Type", form.FormDataContentType())
+	router.ServeHTTP(httptest.NewRecorder(), request)
+
+	if data, _ := os.ReadFile(outside); string(data) != "keep" {
+		t.Fatalf("file outside the script directory was overwritten: %q", data)
 	}
 }

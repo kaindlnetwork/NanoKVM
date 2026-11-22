@@ -20,6 +20,12 @@ gestohlene Sessions oder künftige feinere Rechte ausnutzbar wäre.
 - Lesen, Schreiben und Löschen laufen über `os.Root`
   (`utils/confined.go`). Damit führen auch Symlinks nicht aus dem
   Verzeichnis heraus.
+- Ausgeführt wird nur eine reguläre Datei direkt im Skriptverzeichnis
+  (`utils.ConfinedRegularFile`). Ein Symlink würde sonst außerhalb von
+  `os.Root` von `exec` bzw. `python` erneut aufgelöst und könnte überallhin
+  zeigen. Uploads schreiben über `os.Root`, also nie durch einen
+  vorhandenen Symlink hindurch; sie sind auf 1 MiB begrenzt, weil sie dafür
+  in den Speicher gelesen werden. Beides aus dem Codex-Review zu PR #2.
 - Skripte werden ohne Shell gestartet: `python <pfad>` für `.py`, direkt bei
   `#!`, sonst `sh <pfad>` (dasselbe Verhalten wie vorher die Shell).
 - Skript- und Autostart-Verzeichnis werden mit `0700` angelegt,

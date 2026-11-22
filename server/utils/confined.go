@@ -1,6 +1,9 @@
 package utils
 
-import "os"
+import (
+	"errors"
+	"os"
+)
 
 // The helpers below confine file access to one directory with os.Root: the
 // kernel-side lookup refuses "..", absolute paths and symlinks that lead
@@ -50,3 +53,27 @@ func ConfinedRemove(dir, name string) error {
 	defer func() { _ = root.Close() }()
 	return root.Remove(name)
 }
+
+// ConfinedRegularFile reports an error unless name is a regular file directly
+// inside dir. Symlinks are rejected even if they point inside dir, because a
+// path handed to exec or python is resolved again outside of os.Root.
+func ConfinedRegularFile(dir, name string) error {
+	if _, err := SafeFileName(name); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return ErrNotRegularFile
+	}
+	return nil
+}
+
+var ErrNotRegularFile = errors.New("not a regular file")
