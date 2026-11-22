@@ -1,5 +1,10 @@
 # Nicht benötigte Kernel-Module nicht laden
 
+Die vollständige Analyse des Kernels (Konfiguration, Pflicht- und
+Streichlisten, Härtung, `/dev/mem`) steht in
+[`../kernel/README.md`](../kernel/README.md). Diese Datei behandelt nur die
+Module, die `S00kmod` zur Laufzeit lädt.
+
 Stand: Draft. Braucht einen Test auf echter Hardware, bevor es gemerged wird.
 
 ## Ausgangslage

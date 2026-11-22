@@ -26,6 +26,7 @@ Grundlage ist die Sicherheitsprüfung vom 22.11.2026 auf upstream
 | Thema | Datei | Stand |
 |---|---|---|
 | Nicht benötigte Kernel-Module nicht laden | [kernel-modules](hardening/kernel-modules.md) | Draft |
+| Kernel-Bedarf, Streich- und Härtungsliste | [kernel/README](kernel/README.md) | Analyse, Grundlage für eigenen Kernel |
 
 ## Bekannt und offen
 
