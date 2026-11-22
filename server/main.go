@@ -133,6 +133,7 @@ func dispose() {
 func newEngine(conf *config.Config) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(middleware.CrossOriginProtection())
 	// Hardened fork: no wildcard CORS, not even with authentication disabled.
 	// With auth off, "Access-Control-Allow-Origin: *" let any web page a LAN
 	// user visited drive keyboard, mouse, power and terminal of this device.
