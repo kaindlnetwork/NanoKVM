@@ -19,7 +19,6 @@ import (
 	"NanoKVM-Server/utils"
 
 	"github.com/gin-gonic/gin"
-	cors "github.com/rs/cors/wrapper/gin"
 )
 
 func main() {
@@ -70,11 +69,7 @@ func run() {
 	conf := config.GetInstance()
 
 	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-	r.Use(gin.Recovery())
-	if conf.Authentication == "disable" {
-		r.Use(cors.AllowAll())
-	}
+	r := newEngine(conf)
 
 	router.Init(r)
 
@@ -131,4 +126,18 @@ func run() {
 func dispose() {
 	diskfs.CleanupStale()
 	common.GetKvmVision().Close()
+}
+
+// newEngine builds the gin engine with the global middleware. It is separate
+// from run() so the security-relevant setup can be tested.
+func newEngine(conf *config.Config) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+	// Hardened fork: no wildcard CORS, not even with authentication disabled.
+	// With auth off, "Access-Control-Allow-Origin: *" let any web page a LAN
+	// user visited drive keyboard, mouse, power and terminal of this device.
+	if conf.Authentication == "disable" {
+		log.Println("WARNING: authentication is disabled; anyone who can reach this device controls the target machine")
+	}
+	return r
 }
