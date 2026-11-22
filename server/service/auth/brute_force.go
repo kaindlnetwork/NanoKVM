@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net"
 	"sync"
 	"time"
 
@@ -59,7 +60,54 @@ func GetClientIP(c *gin.Context) string {
 	if ip == "" {
 		ip = c.ClientIP()
 	}
-	return ip
+	return loginKey(ip)
+}
+
+// loginKey groups IPv6 clients by /64: a single host usually controls a whole
+// /64 and could otherwise rotate addresses to dodge the lockout.
+func loginKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.To4() != nil {
+		return ip
+	}
+	return parsed.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+// Login attempts from one client are serialized. Without this, many parallel
+// requests all pass CheckLoginAttempt before the first failure is recorded,
+// which defeats both the lockout and the per-failure delay.
+var (
+	loginGateMutex sync.Mutex
+	loginGates     = map[string]*loginGate{}
+)
+
+type loginGate struct {
+	mutex sync.Mutex
+	refs  int
+}
+
+// LockLoginAttempt blocks until no other login from the same client is in
+// flight and returns the release function.
+func LockLoginAttempt(clientIP string) func() {
+	loginGateMutex.Lock()
+	gate := loginGates[clientIP]
+	if gate == nil {
+		gate = &loginGate{}
+		loginGates[clientIP] = gate
+	}
+	gate.refs++
+	loginGateMutex.Unlock()
+
+	gate.mutex.Lock()
+	return func() {
+		gate.mutex.Unlock()
+		loginGateMutex.Lock()
+		gate.refs--
+		if gate.refs == 0 {
+			delete(loginGates, clientIP)
+		}
+		loginGateMutex.Unlock()
+	}
 }
 
 // CheckLoginAttempt checks if a login attempt is allowed based on brute-force protection rules.
