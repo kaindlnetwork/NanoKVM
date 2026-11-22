@@ -21,6 +21,7 @@ Prüflogik. Ein Gate, das lokal grün ist, ist in der Pipeline grün.
 | `workflow-timeouts` | jeder Job der Fork-Workflows hat `timeout-minutes` <= 60 | ja |
 | `actionlint` | Fork-Workflows | ja |
 | `shellcheck` | `ci/*.sh` | ja |
+| `ci-selftest` | Tests der Gate-Hilfen (`ci/test_*.py`) | ja |
 | `prose` | Stilregeln der Fork-Doku | ja |
 | `gofmt` | Formatierung, nur geänderte Dateien | ja |
 | `go-vet` | `go vet ./...` | ja |
@@ -42,7 +43,11 @@ was der Fork anfasst, muss sauber sein. Ein begründeter Befund bekommt ein
 `#nosec Gxxx` mit Kommentar, warum er hier kein Problem ist.
 
 Der Filter steht in `ci/findings.py` und liest JSON. Er scheitert mit
-Exit 2 an jeder Ausgabe, die er nicht versteht. Anlass: eine erste Fassung
+Exit 2 an jeder Ausgabe, die er nicht versteht, und an jedem Lauf, der nicht
+alles analysiert hat: staticcheck mit Kompilierfehler oder Exit-Code außer
+0/1, gosec mit Einträgen unter `Golang errors`. Sonst fiele ein Paket, das
+nicht kompiliert, aus der Prüfung heraus, und das Gate wäre grün. Die Fälle
+stehen als Tests in `ci/test_findings.py` (Gate `ci-selftest`). Anlass: eine erste Fassung
 filterte die eingefärbte Textausgabe von gosec, fand darin nie einen
 Dateinamen und meldete deshalb immer grün.
 
