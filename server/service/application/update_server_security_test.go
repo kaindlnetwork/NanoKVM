@@ -29,3 +29,19 @@ func TestStoredHTTPUpdateServerIsNotUsed(t *testing.T) {
 		t.Fatal("stored http update server would be used")
 	}
 }
+
+// A disabled custom server with an old http URL is not used anyway. It must
+// not make loading fail, or regular updates from the default server break.
+func TestDisabledLegacyHTTPServerDoesNotBlockUpdates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "application-update.json")
+	if err := os.WriteFile(path, []byte(`{"enabled":false,"url":"http://updates.example.com/nanokvm"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadUpdateServerConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	if cfg.Enabled || cfg.URL != StableURL {
+		t.Fatalf("cfg = %+v, want disabled with %s", cfg, StableURL)
+	}
+}

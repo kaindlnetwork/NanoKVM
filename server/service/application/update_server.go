@@ -154,6 +154,12 @@ func loadUpdateServerConfigFromPath(path string) (UpdateServerConfig, error) {
 
 	normalizedURL, err := normalizeUpdateServerURL(cfg.URL)
 	if err != nil {
+		// A disabled entry is never contacted. An old http URL in it (allowed
+		// before https became mandatory) must not break updates from the
+		// default server, so it is replaced; an enabled one still fails.
+		if !cfg.Enabled {
+			return defaultUpdateServerConfig(), nil
+		}
 		return UpdateServerConfig{}, err
 	}
 	if normalizedURL == "" {
