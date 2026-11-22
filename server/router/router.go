@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"NanoKVM-Server/middleware"
 	"NanoKVM-Server/service/auth"
 	"NanoKVM-Server/service/controlmode"
 	"NanoKVM-Server/service/picoclaw"
@@ -31,6 +32,8 @@ func web(r *gin.Engine) {
 	execDir := filepath.Dir(execPath)
 	webPath := fmt.Sprintf("%s/web", execDir)
 
+	// Registered before any route, so it covers the UI and the API.
+	r.Use(middleware.SecurityHeaders())
 	r.Use(webcache.Headers(webPath))
 	r.Use(static.Serve("/", static.LocalFile(webPath, true)))
 }
