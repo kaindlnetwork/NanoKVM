@@ -1,0 +1,98 @@
+name: Gates
+
+# Die Gates selbst stehen in ci/gate.sh, nicht hier. Dieser Workflow ist nur
+# die GitHub-Verkabelung: Image bereitstellen, auschecken, Skript aufrufen.
+#
+# Runner: Repository-Variable CI_RUNNER (Settings -> Secrets and variables ->
+# Actions -> Variables). Leer = ubuntu-latest (Actions-Kontingent). Mit
+# "self-hosted" laeuft alles auf dem eigenen Runner, der dafuer Docker
+# braucht. Siehe docs/fork/CI.md.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # Woechentlich: neue CVEs in Abhaengigkeiten fallen auch ohne Commit auf.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  image:
+    name: CI-Image bereitstellen
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Image-Tag aus ci/Dockerfile ableiten
+        id: tag
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          echo "image=ghcr.io/${repo}/ci:$(ci/deps-tag.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: An GHCR anmelden
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bauen, falls der Tag fehlt
+        env:
+          IMAGE: ${{ steps.tag.outputs.image }}
+        run: |
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Image vorhanden: $IMAGE"
+            exit 0
+          fi
+          docker build -t "$IMAGE" -f ci/Dockerfile ci
+          docker push "$IMAGE"
+
+  gates:
+    name: ci/gate.sh
+    needs: image
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Vergleichsbasis setzen
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -n "$BASE_REF" ]; then
+            echo "GATE_BASE=origin/$BASE_REF" >> "$GITHUB_ENV"
+          else
+            echo "GATE_BASE=HEAD~1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Gates
+        run: ./ci/gate.sh all govulncheck web-audit
