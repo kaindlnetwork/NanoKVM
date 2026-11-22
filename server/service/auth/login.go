@@ -26,6 +26,8 @@ func (s *Service) Login(c *gin.Context) {
 	}
 
 	clientIP := GetClientIP(c)
+	release := LockLoginAttempt(clientIP)
+	defer release()
 	if locked, code, msg := CheckLoginAttempt(clientIP); locked {
 		time.Sleep(3 * time.Second)
 		rsp.ErrRsp(c, code, msg)
