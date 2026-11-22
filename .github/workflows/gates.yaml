@@ -27,19 +27,18 @@ permissions:
   packages: read
 
 jobs:
-  image:
-    name: CI-Image bereitstellen
+  gates:
+    name: ci/gate.sh
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
-    outputs:
-      image: ${{ steps.tag.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Image-Tag aus ci/Dockerfile ableiten
@@ -48,51 +47,50 @@ jobs:
           repo="${GITHUB_REPOSITORY,,}"
           echo "image=ghcr.io/${repo}/ci:$(ci/deps-tag.sh)" >> "$GITHUB_OUTPUT"
 
+      # Pull Requests aus einem Fork bekommen nur ein Lese-Token. Sie bauen
+      # ein fehlendes Image lokal und pushen es nicht.
+      - name: Push erlaubt?
+        id: trust
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ -z "$HEAD_REPO" ] || [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: An GHCR anmelden
+        if: steps.trust.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Bauen, falls der Tag fehlt
+      - name: Image ziehen oder bauen
         env:
           IMAGE: ${{ steps.tag.outputs.image }}
+          PUSH: ${{ steps.trust.outputs.push }}
         run: |
-          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
-            echo "Image vorhanden: $IMAGE"
+          if docker pull "$IMAGE"; then
             exit 0
           fi
           docker build -t "$IMAGE" -f ci/Dockerfile ci
-          docker push "$IMAGE"
-
-  gates:
-    name: ci/gate.sh
-    needs: image
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 45
-    container:
-      image: ${{ needs.image.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Vergleichsbasis setzen
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          if [ -n "$BASE_REF" ]; then
-            echo "GATE_BASE=origin/$BASE_REF" >> "$GITHUB_ENV"
-          else
-            echo "GATE_BASE=HEAD~1" >> "$GITHUB_ENV"
+          if [ "$PUSH" = "true" ]; then
+            docker push "$IMAGE"
           fi
 
       - name: Gates
-        run: ./ci/gate.sh all govulncheck web-audit
+        env:
+          IMAGE: ${{ steps.tag.outputs.image }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            base="origin/$BASE_REF"
+          else
+            base="HEAD~1"
+          fi
+          docker run --rm -e GATE_BASE="$base" -v "$PWD:/work" -w /work "$IMAGE" \
+            ./ci/gate.sh all govulncheck web-audit
